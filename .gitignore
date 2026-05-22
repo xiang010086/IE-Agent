@@ -1,0 +1,51 @@
+# Python缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 视频文件（占用空间太大）
+data/videos/
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# 分析结果缓存（可重建）
+data/processed/
+
+# 导出报告（可重建）
+data/exports/
+
+# 数据库文件（可重建）
+data/database/
+data/projects/
+
+# Node模块（可用npm install重建）
+node_modules/
+
+# 临时文件
+*.tmp
+*.log
+*.bak
+0.10.0
+1.30.0
+6.0
+
+# IDE配置
+.vscode/
+.idea/
+
+# Claude配置（私密）
+.claude/
+
+# 模型文件（太大）
+models/
+
+# 测试数据
+data/test_*
+
+# 系统文件
+.DS_Store
+Thumbs.db

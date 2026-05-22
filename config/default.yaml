@@ -1,0 +1,68 @@
+# 工业IE智能体默认配置
+# 版本：v1.0
+# 日期：2025-05-21
+
+# 视频处理配置
+video:
+  max_frames: 500          # 最大处理帧数
+  target_fps: 30           # 目标帧率
+  resolution:
+    width: 640
+    height: 480
+
+# 姿态估计配置
+pose:
+  model_complexity: 1      # 0=lite, 1=full, 2=heavy
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+  smooth_landmarks: true
+
+# 动作识别阈值
+action_thresholds:
+  # Reach (伸手)
+  reach:
+    velocity_threshold: 0.15    # 速度阈值 (帧/秒)
+    distance_threshold: 0.05    # 距离阈值 (画面比例)
+    arm_angle_threshold: 150    # 手臂伸展角度
+
+  # Grasp (抓取)
+  grasp:
+    velocity_drop_threshold: 0.05   # 速度骤降阈值
+    duration_threshold: 0.5         # 持续时间阈值 (秒)
+    arm_bend_threshold: 120         # 手臂弯曲角度
+
+  # Move (移动)
+  move:
+    velocity_threshold: 0.1         # 稳定移动速度
+    direction_change_threshold: 30  # 方向变化阈值 (度/帧)
+    max_duration: 5.0               # 最大持续时间 (秒)
+
+  # Release (放开)
+  release:
+    arm_extension_threshold: 150    # 手臂伸展角度
+    velocity_threshold: 0.05        # 速度阈值
+
+  # Wait (等待)
+  wait:
+    static_velocity_threshold: 0.02  # 静止速度阈值
+    min_duration: 1.0                # 最小等待时长 (秒)
+    max_duration: 30.0               # 最大等待时长 (秒)
+
+# MTM分析配置
+mtm:
+  allowance_rate: 0.15        # 宽放率 (15%)
+  distance_categories:
+    short: 10                 # 短距离 (cm)
+    medium: 25                # 中距离 (cm)
+    long: 40                  # 长距离 (cm)
+
+# 界面配置
+ui:
+  show_pose_skeleton: true
+  show_action_labels: true
+  animation_speed: 1.0
+
+# 导出配置
+export:
+  csv_include_keypoints: false
+  pdf_include_timeline: true
