@@ -1,51 +1,33 @@
-# Python缓存文件
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
-
-# 视频文件（占用空间太大）
-data/videos/
-*.mp4
-*.avi
-*.mov
-*.mkv
-
-# 分析结果缓存（可重建）
-data/processed/
-
-# 导出报告（可重建）
-data/exports/
-
-# 数据库文件（可重建）
-data/database/
-data/projects/
-
-# Node模块（可用npm install重建）
+.venv/
 node_modules/
+data/projects/
+data/exports/
+data/input_videos/
+config/api_config.yaml
 
-# 临时文件
-*.tmp
-*.log
-*.bak
-0.10.0
-1.30.0
-6.0
-
-# IDE配置
-.vscode/
-.idea/
-
-# Claude配置（私密）
+# Backup files
+IE_Agent_完整备份_20260529/
+IE_Agent_完整备份_20260529.zip
+_旧代码备份_20260607/
 .claude/
 
-# 模型文件（太大）
-models/
+# Vision model binaries (download via scripts/download_models.py)
+data/models/
+yolov8n.pt
+*.pt
+*.task
 
-# 测试数据
-data/test_*
+# SQLite database (contains user credentials)
+data/ie_agent.db
 
-# 系统文件
-.DS_Store
-Thumbs.db
+# Runtime artifacts / logs / screenshots
+data/*.pid
+data/*.log
+data/*.png
+data/diag_test/
+annotated_output.mp4
+wrist_speed.png
+*.db-shm
+*.db-wal

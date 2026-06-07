@@ -1,0 +1,101 @@
+# 内置 IE 方法论 / 生产经济性知识库（1 期，精选）
+# 供报告叙述层按分析信号挑选后注入 DeepSeek，作为"引经据典"的理论依据。
+# 信号 signals: bottleneck / high_wait / low_efficiency / lbr_below_target / capacity_shortage / baseline
+# 每条目都点明它如何支撑「加人 / 换人 / 拆分工序」三类决策。
+
+- id: mtm
+  name_zh: MTM 方法-时间测量
+  name_en: Methods-Time Measurement (MTM-1)
+  category: standard
+  summary_zh: 把人工作业分解为伸手、抓取、移动、定位、放手等基本动作，每个动作按距离/难度查预定时间标准（1 TMU=0.036 秒），加总得到不含宽放的正常时间。是标准工时与节拍核算的科学基准。
+  key_points_zh:
+    - 用预定动作时间替代秒表主观估计，可复现、可对比
+    - 正常时间 + 宽放(疲劳/生理/管理) = 标准工时
+    - 标准工时是判断"该工位要几个人"的人力测算基础
+  applies_to: [baseline, bottleneck, low_efficiency]
+  citation: MTM-1 预定动作时间标准
+
+- id: motion_economy
+  name_zh: 动作经济原则
+  name_en: Principles of Motion Economy
+  category: principle
+  summary_zh: 吉尔布雷斯提出的人体动作经济三类原则——关于人体使用、工作场所布置、工具设备设计。核心是消除/缩短无效动作，让双手同时对称作业、把物料放在最佳伸手区。
+  key_points_zh:
+    - 双手同时开始/结束，避免一手空闲
+    - 物料按使用顺序放入正常伸手区，减少移动与寻找
+    - 用滑道/重力/定位治具替代人工搬运与定位
+  applies_to: [low_efficiency, bottleneck]
+  citation: Gilbreth 动作经济原则
+
+- id: ecrs
+  name_zh: ECRS 改善四原则
+  name_en: ECRS (Eliminate-Combine-Rearrange-Simplify)
+  category: method
+  summary_zh: 工序改善的经典四步：取消(Eliminate)不必要动作/工序、合并(Combine)可同时完成的、重排(Rearrange)顺序以减少往返、简化(Simplify)剩余动作。是"拆分/重排工序"的方法论基础。
+  key_points_zh:
+    - 先问"能不能取消"，再问合并、重排、简化
+    - 重排可把瓶颈工位的部分工序转移到负荷低的工位
+    - 拆分瓶颈工序时按 ECRS 评估每个动作的去留
+  applies_to: [bottleneck, low_efficiency, lbr_below_target]
+  citation: ECRS 工序改善四原则
+
+- id: seven_wastes
+  name_zh: 精益七大浪费
+  name_en: Seven Wastes (Lean / TPS)
+  category: theory
+  summary_zh: 丰田生产方式识别的七种浪费：过量生产、等待、搬运、过度加工、库存、动作、不良。其中"等待"与"动作"浪费直接对应工位高等待与低效率。
+  key_points_zh:
+    - 等待浪费高 → 上下游节拍不匹配或缺料，需平衡或设缓冲
+    - 动作浪费高 → 作业方法/布置问题，结合动作经济改善
+    - 消除浪费优先于增加资源（先挖潜再加人）
+  applies_to: [high_wait, low_efficiency]
+  citation: 丰田生产方式 七大浪费
+
+- id: line_balancing
+  name_zh: 产线平衡与平衡率(LBR)
+  name_en: Line Balancing Rate
+  category: method
+  summary_zh: LBR=各工位作业时间之和/(最大工位时间×工位数)，衡量各工位忙闲是否均衡。LBR 低说明负荷不均、瓶颈突出，应把瓶颈工序拆分/重排到空闲工位，使各工位趋近瓶颈的 85%-95%。
+  key_points_zh:
+    - LBR 低 → 优先"拆分工序/重排"而非盲目加人
+    - 平衡后整线产能由瓶颈节拍决定
+    - 平衡是"拆分工序"决策的直接依据
+  applies_to: [lbr_below_target, bottleneck, baseline]
+  citation: 产线平衡 Line Balancing
+
+- id: takt_theory
+  name_zh: 节拍时间(Takt Time)理论
+  name_en: Takt Time
+  category: theory
+  summary_zh: Takt=可用工作时间/客户需求量，是为满足需求各工位必须达到的节奏。若瓶颈节拍 > Takt，则单工位产能不足，必须拆分工序或增加人手/并行；据 Σ标准工时/Takt 可算出理论需求人数。
+  key_points_zh:
+    - 瓶颈节拍 > Takt → 产能不足 → 拆分工序或加人
+    - 需求人数 = ⌈Σ标准工时 / Takt⌉，对比现有人数得人力缺口
+    - Takt 是"加人/拆分"决策的量化标尺
+  applies_to: [capacity_shortage]
+  citation: 精益 Takt Time 理论
+
+- id: ergonomics
+  name_zh: 人因工程(工效学)
+  name_en: Ergonomics / Human Factors
+  category: ergonomics
+  summary_zh: 研究人-机-环境匹配，关注作业姿势、用力、疲劳与节拍稳定性。不合理的姿势与高疲劳会拉低有效效率、增大节拍波动，往往表现为某工位效率异常低（疑似人/方法问题）。
+  key_points_zh:
+    - 工位效率异常低先排查姿势/疲劳/工具，再考虑换人或培训
+    - 降低疲劳可提升节拍稳定性与一致性
+    - 合理宽放系数应覆盖疲劳与生理需要
+  applies_to: [low_efficiency]
+  citation: 人因工程 Ergonomics
+
+- id: labor_standards
+  name_zh: 劳动定额与标准工时/宽放
+  name_en: Labor Standards & Allowances
+  category: standard
+  summary_zh: 劳动定额以标准工时为基础确定单件用工与人员配置。标准工时=正常时间×(1+宽放率)，宽放含疲劳、生理、管理等。是核算单件人工成本、人员需求与产能的经济性依据。
+  key_points_zh:
+    - 标准工时×需求量/可用工时 → 理论人力需求
+    - 宽放率影响人力测算与节拍达成判断
+    - 人力富余 → 调岗/换人降本；人力不足 → 加人
+  applies_to: [capacity_shortage, low_efficiency]
+  citation: 劳动定额与标准工时
+

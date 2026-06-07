@@ -1,387 +1,280 @@
-"""
-节拍计算模块
-功能：计算标准节拍、实际节拍、节拍效率等指标
-版本：v1.0 (Day 2交付)
-日期：2025-05-21
+"""Takt-time / capacity / manpower analysis (production economics).
 
-节拍（Takt Time/Cycle Time）计算：
-- 标准节拍 = 总有效工作时间 / 客户需求量
-- 实际节拍 = 动作序列总时长
-- 节拍效率 = 标准工时 / 实际节拍
+Deterministic, None-safe pure functions. Given the project-info inputs (shift
+length, break, demand, effective rate, allowance) plus the already-computed
+line metrics and per-station results, derive demand-driven takt time, capacity
+status, and required manpower.
+
+The doc's task-3 was single-process; here it is adapted to a MULTI-STATION line:
+- the binding cycle for capacity is the line bottleneck (max station cycle),
+- required workers aggregate standard time across all stations.
+
+If any required input is missing the result is ``skipped`` with a reason, so the
+report/UI can honestly print "未提供必要参数，跳过节拍分析".
 """
-import numpy as np
-from typing import List, Optional, Dict
-from dataclasses import dataclass
-from src.core.action_recognizer import ActionSequence, ActionType
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from math import ceil
+from typing import Any
+
+# Inputs that MUST be present (and positive) to run takt analysis.
+# break_minutes is intentionally NOT here: a line with no break (break=0) is valid;
+# compute_takt defaults it to 0.
+REQUIRED_FIELDS = ("shift_minutes", "demand_per_shift", "effective_rate")
 
 
 @dataclass
-class CycleTimeMetrics:
-    """节拍指标数据结构"""
-    takt_time: float           # 客户需求节拍（秒）
-    standard_cycle_time: float # 标准节拍时间（秒）
-    actual_cycle_time: float   # 实际节拍时间（秒）
-    cycle_efficiency: float    # 节拍效率（%）
-    cycle_variance: float      # 节拍偏差（秒）
-    cycle_utilization: float   # 节拍利用率（%）
-    bottleneck_time: float     # 瓶颈工序时间（秒）
+class TaktResult:
+    available_time_s: float | None = None       # (shift - break) * 60 * effective_rate
+    takt_time_s: float | None = None            # available_time / demand
+    bottleneck_cycle_s: float | None = None     # from line_metrics.max_cycle_time
+    capacity_status: str = "unknown"            # ok | bottleneck_over_takt | unknown
+    capacity_gap_s: float | None = None         # bottleneck_cycle - takt (signed)
+    total_standard_time_s: float | None = None  # sum of per-station standard time (allowance applied)
+    required_workers: int | None = None         # ceil(total_standard_time / takt)
+    current_workers: int | None = None
+    worker_gap: int | None = None               # required - current
+    theoretical_capacity_per_shift: float | None = None  # available_time / bottleneck_cycle
+    allowance_factor: float = 1.0
+    skipped: bool = True
+    skip_reason: str | None = None
+    inputs_used: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class MultiStationCycle:
-    """多工位节拍数据结构"""
-    station_id: int
-    station_name: str
-    cycle_time: float
-    wait_time: float
-    work_time: float
-    efficiency: float
-
-
-class CycleTimeCalculator:
-    """
-    节拍计算器
-    计算标准节拍、实际节拍、节拍效率等工业工程指标
-    """
-
-    def __init__(
-        self,
-        working_hours_per_day: float = 8.0,
-        breaks_per_day: float = 0.5,
-        effective_working_ratio: float = 0.85
-    ):
-        """
-        初始化节拍计算器
-
-        Args:
-            working_hours_per_day: 每日工作时长（小时）
-            breaks_per_day: 每日休息时间（小时）
-            effective_working_ratio: 有效工作时间比例
-        """
-        self.working_hours_per_day = working_hours_per_day
-        self.breaks_per_day = breaks_per_day
-        self.effective_working_ratio = effective_working_ratio
-
-    def calculate_takt_time(
-        self,
-        daily_demand: float,
-        shift_count: int = 1
-    ) -> float:
-        """
-        计算客户需求节拍（Takt Time）
-
-        Args:
-            daily_demand: 每日客户需求量（件）
-            shift_count: 班次数量
-
-        Returns:
-            float: 需求节拍（秒/件）
-        """
-        if daily_demand <= 0:
-            return 0.0
-
-        # 计算每班有效工作时间（秒）
-        effective_time_per_shift = (
-            (self.working_hours_per_day - self.breaks_per_day)
-            * 3600
-            * self.effective_working_ratio
-        )
-
-        # 计算总有效工作时间
-        total_effective_time = effective_time_per_shift * shift_count
-
-        # 计算节拍
-        takt_time = total_effective_time / daily_demand
-
-        return takt_time
-
-    def calculate_standard_cycle_time(
-        self,
-        action_sequence: ActionSequence
-    ) -> float:
-        """
-        计算标准节拍时间（基于MTM标准工时）
-
-        Args:
-            action_sequence: 动作序列
-
-        Returns:
-            float: 标准节拍时间（秒）
-        """
-        # TMU转换为秒（1 TMU = 0.036秒）
-        total_tmu_sec = action_sequence.total_tmu * 0.036
-
-        # 添加宽放时间（默认15%）
-        allowance_rate = 0.15
-        standard_time = total_tmu_sec * (1 + allowance_rate)
-
-        return standard_time
-
-    def calculate_actual_cycle_time(
-        self,
-        action_sequence: ActionSequence
-    ) -> float:
-        """
-        计算实际节拍时间（基于实际观测时长）
-
-        Args:
-            action_sequence: 动作序列
-
-        Returns:
-            float: 实际节拍时间（秒）
-        """
-        return action_sequence.total_duration
-
-    def calculate_cycle_efficiency(
-        self,
-        standard_time: float,
-        actual_time: float
-    ) -> float:
-        """
-        计算节拍效率
-
-        Args:
-            standard_time: 标准时间（秒）
-            actual_time: 实际时间（秒）
-
-        Returns:
-            float: 节拍效率（%）
-        """
-        if actual_time <= 0:
-            return 0.0
-
-        efficiency = (standard_time / actual_time) * 100
-        return min(efficiency, 100.0)  # 效率不超过100%
-
-    def calculate_cycle_metrics(
-        self,
-        action_sequence: ActionSequence,
-        daily_demand: Optional[float] = None,
-        shift_count: int = 1
-    ) -> CycleTimeMetrics:
-        """
-        计算完整节拍指标
-
-        Args:
-            action_sequence: 动作序列
-            daily_demand: 每日客户需求量（可选）
-            shift_count: 班次数量
-
-        Returns:
-            CycleTimeMetrics: 节拍指标对象
-        """
-        # 计算节拍时间
-        standard_time = self.calculate_standard_cycle_time(action_sequence)
-        actual_time = self.calculate_actual_cycle_time(action_sequence)
-
-        # 计算客户需求节拍
-        takt_time = 0.0
-        if daily_demand and daily_demand > 0:
-            takt_time = self.calculate_takt_time(daily_demand, shift_count)
-
-        # 计算效率
-        efficiency = self.calculate_cycle_efficiency(standard_time, actual_time)
-
-        # 计算节拍偏差
-        variance = actual_time - standard_time
-
-        # 计算节拍利用率（相对于需求节拍）
-        utilization = 0.0
-        if takt_time > 0:
-            utilization = (standard_time / takt_time) * 100
-
-        # 识别瓶颈时间（最长单个动作）
-        bottleneck_time = 0.0
-        if action_sequence.actions:
-            bottleneck_time = max(a.duration for a in action_sequence.actions)
-
-        return CycleTimeMetrics(
-            takt_time=takt_time,
-            standard_cycle_time=standard_time,
-            actual_cycle_time=actual_time,
-            cycle_efficiency=efficiency,
-            cycle_variance=variance,
-            cycle_utilization=utilization,
-            bottleneck_time=bottleneck_time
-        )
-
-    def calculate_multi_station_cycles(
-        self,
-        station_sequences: Dict[int, ActionSequence],
-        station_names: Optional[Dict[int, str]] = None
-    ) -> List[MultiStationCycle]:
-        """
-        计算多工位节拍
-
-        Args:
-            station_sequences: 各工位动作序列 {工位ID: ActionSequence}
-            station_names: 工位名称字典（可选）
-
-        Returns:
-            List[MultiStationCycle]: 多工位节拍列表
-        """
-        results = []
-
-        for station_id, sequence in station_sequences.items():
-            station_name = station_names.get(station_id, f"工位{station_id}") if station_names else f"工位{station_id}"
-
-            # 计算工作时间（排除Wait）
-            work_time = sum(
-                a.duration for a in sequence.actions
-                if a.action_type != ActionType.WAIT
-            )
-
-            # 计算等待时间
-            wait_time = sum(
-                a.duration for a in sequence.actions
-                if a.action_type == ActionType.WAIT
-            )
-
-            # 计算效率
-            total_time = sequence.total_duration
-            efficiency = (work_time / total_time * 100) if total_time > 0 else 0.0
-
-            results.append(MultiStationCycle(
-                station_id=station_id,
-                station_name=station_name,
-                cycle_time=total_time,
-                wait_time=wait_time,
-                work_time=work_time,
-                efficiency=efficiency
-            ))
-
-        return results
-
-    def identify_bottleneck_station(
-        self,
-        station_cycles: List[MultiStationCycle]
-    ) -> Optional[MultiStationCycle]:
-        """
-        识别瓶颈工位（节拍最长的工位）
-
-        Args:
-            station_cycles: 多工位节拍列表
-
-        Returns:
-            Optional[MultiStationCycle]: 瓶颈工位
-        """
-        if not station_cycles:
+def _num(value: Any) -> float | None:
+    """Coerce to a positive float, else None (treats 0/blank/garbage as missing)."""
+    try:
+        if value is None:
             return None
-
-        return max(station_cycles, key=lambda x: x.cycle_time)
-
-    def calculate_line_takt(
-        self,
-        station_cycles: List[MultiStationCycle],
-        daily_demand: float,
-        shift_count: int = 1
-    ) -> Dict[str, float]:
-        """
-        计算产线节拍匹配度
-
-        Args:
-            station_cycles: 多工位节拍列表
-            daily_demand: 每日需求量
-            shift_count: 班次数量
-
-        Returns:
-            Dict: 节拍匹配分析结果
-        """
-        if not station_cycles or daily_demand <= 0:
-            return {}
-
-        # 计算需求节拍
-        takt_time = self.calculate_takt_time(daily_demand, shift_count)
-
-        # 识别瓶颈工位
-        bottleneck = self.identify_bottleneck_station(station_cycles)
-        bottleneck_time = bottleneck.cycle_time if bottleneck else 0.0
-
-        # 计算产线节拍匹配度
-        line_takt_match = (takt_time / bottleneck_time * 100) if bottleneck_time > 0 else 0.0
-
-        # 计算节拍松弛时间
-        slack_time = takt_time - bottleneck_time
-
-        # 计算产能
-        if bottleneck_time > 0:
-            effective_time = (
-                (self.working_hours_per_day - self.breaks_per_day)
-                * 3600
-                * self.effective_working_ratio
-                * shift_count
-            )
-            production_capacity = effective_time / bottleneck_time
-        else:
-            production_capacity = 0.0
-
-        return {
-            'takt_time': takt_time,
-            'bottleneck_time': bottleneck_time,
-            'bottleneck_station': bottleneck.station_name if bottleneck else '',
-            'line_takt_match': line_takt_match,
-            'slack_time': slack_time,
-            'production_capacity': production_capacity,
-            'meets_demand': bottleneck_time <= takt_time if bottleneck_time > 0 else False
-        }
-
-    def generate_cycle_report(
-        self,
-        metrics: CycleTimeMetrics
-    ) -> str:
-        """
-        生成节拍分析报告文本
-
-        Args:
-            metrics: 节拍指标
-
-        Returns:
-            str: 报告文本
-        """
-        report = f"""
-节拍分析报告
-====================
-
-基础指标：
-- 客户需求节拍：{metrics.takt_time:.2f} 秒/件
-- 标准节拍时间：{metrics.standard_cycle_time:.2f} 秒
-- 实际节拍时间：{metrics.actual_cycle_time:.2f} 秒
-
-效率指标：
-- 节拍效率：{metrics.cycle_efficiency:.1f}%
-- 节拍利用率：{metrics.cycle_utilization:.1f}%
-
-偏差分析：
-- 节拍偏差：{metrics.cycle_variance:.2f} 秒
-- 瓶颈时间：{metrics.bottleneck_time:.2f} 秒
-
-建议：
-"""
-        if metrics.cycle_efficiency < 80:
-            report += "- 节拍效率偏低，建议优化动作流程，减少非增值动作\n"
-        if metrics.cycle_variance > 5:
-            report += "- 实际时间超出标准时间较多，建议进行员工培训或工艺优化\n"
-        if metrics.cycle_utilization > 100:
-            report += "- 节拍利用率过高，可能影响质量和员工疲劳，建议增加人员或设备\n"
-        else:
-            report += "- 节拍匹配良好，建议保持当前作业模式\n"
-
-        return report
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f > 0 else None
 
 
-def calculate_cycle_time_from_sequence(
-    action_sequence: ActionSequence,
-    daily_demand: Optional[float] = None
-) -> CycleTimeMetrics:
+def _normalize_rate(value: float | None) -> float | None:
+    """Effective rate as a 0-1 fraction. Accept percent (e.g. 85) and normalize."""
+    if value is None:
+        return None
+    return value / 100.0 if value > 1.0 else value
+
+
+def _missing_fields(project_info: dict[str, Any]) -> list[str]:
+    missing = []
+    for key in REQUIRED_FIELDS:
+        val = _num(project_info.get(key))
+        if key == "effective_rate":
+            val = _normalize_rate(val)
+        if val is None:
+            missing.append(key)
+    return missing
+
+
+def _station_standard_time(station: dict[str, Any]) -> float:
+    """Per-station base standard time (pre project-allowance).
+
+    Prefer mtm_summary.standard_time (== effective_time at factor 1.0); fall back
+    to cycle_time_metrics.effective_time. Skip error stations (0).
     """
-    便捷函数：从动作序列计算节拍指标
+    mtm = station.get("mtm_summary", {}) or {}
+    st = _num(mtm.get("standard_time"))
+    if st is not None:
+        return st
+    eff = _num((station.get("cycle_time_metrics", {}) or {}).get("effective_time"))
+    return eff or 0.0
 
-    Args:
-        action_sequence: 动作序列
-        daily_demand: 每日需求量（可选）
 
-    Returns:
-        CycleTimeMetrics: 节拍指标
+def compute_takt(
+    project_info: dict[str, Any] | None,
+    line_metrics: dict[str, Any] | None,
+    stations: list[dict[str, Any]] | None,
+) -> TaktResult:
+    """Compute takt / capacity / manpower. Returns a skipped result if inputs missing."""
+    project_info = project_info or {}
+    line_metrics = line_metrics or {}
+    stations = stations or []
+
+    missing = _missing_fields(project_info)
+    if missing:
+        return TaktResult(
+            skipped=True,
+            skip_reason="未提供必要参数（班次时长/休息/需求/有效作业率），跳过节拍分析。",
+            inputs_used={"missing": missing},
+        )
+
+    shift = _num(project_info.get("shift_minutes"))
+    brk = float(project_info.get("break_minutes") or 0.0)  # break may legitimately be 0
+    demand = _num(project_info.get("demand_per_shift"))
+    rate = _normalize_rate(_num(project_info.get("effective_rate")))
+    allowance = _num(project_info.get("allowance_factor")) or 1.0
+
+    net_minutes = max(0.0, shift - brk)
+    available_time_s = net_minutes * 60.0 * rate
+    if available_time_s <= 0 or demand <= 0:
+        return TaktResult(
+            skipped=True,
+            skip_reason="班次净工时或需求量无效，无法计算节拍。",
+            inputs_used={"shift_minutes": shift, "break_minutes": brk,
+                         "effective_rate": rate, "demand_per_shift": demand},
+        )
+
+    takt_time_s = available_time_s / demand
+
+    bottleneck_cycle_s = _num(line_metrics.get("max_cycle_time"))
+    capacity_status = "unknown"
+    capacity_gap_s = None
+    theoretical_capacity = None
+    if bottleneck_cycle_s is not None:
+        capacity_status = "bottleneck_over_takt" if bottleneck_cycle_s > takt_time_s else "ok"
+        capacity_gap_s = round(bottleneck_cycle_s - takt_time_s, 2)
+        theoretical_capacity = round(available_time_s / bottleneck_cycle_s, 1)
+
+    total_standard = round(sum(_station_standard_time(s) for s in stations) * allowance, 2)
+    required_workers = ceil(total_standard / takt_time_s) if total_standard > 0 else None
+
+    current_workers_raw = _num(project_info.get("operator_count"))
+    current_workers = int(current_workers_raw) if current_workers_raw is not None else None
+    worker_gap = (
+        required_workers - current_workers
+        if (required_workers is not None and current_workers is not None)
+        else None
+    )
+
+    return TaktResult(
+        available_time_s=round(available_time_s, 1),
+        takt_time_s=round(takt_time_s, 2),
+        bottleneck_cycle_s=round(bottleneck_cycle_s, 2) if bottleneck_cycle_s is not None else None,
+        capacity_status=capacity_status,
+        capacity_gap_s=capacity_gap_s,
+        total_standard_time_s=total_standard,
+        required_workers=required_workers,
+        current_workers=current_workers,
+        worker_gap=worker_gap,
+        theoretical_capacity_per_shift=theoretical_capacity,
+        allowance_factor=round(allowance, 3),
+        skipped=False,
+        skip_reason=None,
+        inputs_used={
+            "shift_minutes": shift,
+            "break_minutes": brk,
+            "demand_per_shift": demand,
+            "effective_rate": rate,
+            "allowance_factor": allowance,
+        },
+    )
+
+
+def takt_to_dict(result: TaktResult) -> dict[str, Any]:
+    """JSON-serializable dict for the summary / report."""
+    return asdict(result)
+
+
+# ---------------------------------------------------------------------------
+# Action verdicts — the whole point: tell the factory 加人 / 换人 / 拆分工序.
+# Deterministic decisions derived from real numbers; DeepSeek only explains why.
+# ---------------------------------------------------------------------------
+
+ACTION_ADD = "add_worker"     # 加人：产能不足，需增加人手 / 并行
+ACTION_SWAP = "swap_worker"   # 换人/调岗：工位效率低(人/方法问题)，或人力冗余需调岗
+ACTION_SPLIT = "split_task"   # 拆分工序：瓶颈节拍过长 / 产线不平衡，拆分或重排
+ACTION_OK = "ok"              # 暂无明显问题
+
+LOW_EFFICIENCY_PCT = 60.0     # 工位效率低于此 → 疑似人/方法问题（换人/培训）
+
+
+def recommend_line_actions(
+    line_metrics: dict[str, Any] | None,
+    takt_analysis: dict[str, Any] | None,
+    stations: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Turn metrics into concrete 加人/换人/拆分工序 verdicts (numbers in the reason).
+
+    Each item: {action, target, severity, reason}. Returns an ``ok`` item if no
+    issue is found. Headline = the first (highest-severity) item.
     """
-    calculator = CycleTimeCalculator()
-    return calculator.calculate_cycle_metrics(action_sequence, daily_demand)
+    line_metrics = line_metrics or {}
+    takt = takt_analysis or {}
+    stations = stations or []
+    actions: list[dict[str, Any]] = []
+
+    bottleneck = line_metrics.get("bottleneck") or {}
+    bn_name = bottleneck.get("station_name") or "瓶颈工位"
+    bn_cycle = bottleneck.get("cycle_time")
+    lbr = line_metrics.get("lbr")
+    lbr_target = line_metrics.get("lbr_target")
+
+    takt_ok = not takt.get("skipped", True)
+    takt_time = takt.get("takt_time_s")
+    worker_gap = takt.get("worker_gap")
+    required = takt.get("required_workers")
+    current = takt.get("current_workers")
+
+    # 1) Capacity shortage → 加人 and/or 拆分瓶颈
+    if takt_ok and takt.get("capacity_status") == "bottleneck_over_takt" and bn_cycle and takt_time:
+        actions.append({
+            "action": ACTION_SPLIT,
+            "target": bn_name,
+            "severity": "high",
+            "reason": f"瓶颈工位「{bn_name}」节拍 {bn_cycle}s 超过客户节拍 Takt {takt_time}s，"
+                      f"单工位无法满足需求，应拆分/重排其工序或并行作业。",
+        })
+    if takt_ok and isinstance(worker_gap, (int, float)) and worker_gap > 0:
+        actions.append({
+            "action": ACTION_ADD,
+            "target": "产线",
+            "severity": "high",
+            "reason": f"按 Takt 需求人数 {required} 人 > 现有 {current} 人，缺口 {worker_gap} 人，"
+                      f"产能不足，需增加 {worker_gap} 名工人（或对瓶颈并行）。",
+        })
+    elif takt_ok and isinstance(worker_gap, (int, float)) and worker_gap < 0:
+        actions.append({
+            "action": ACTION_SWAP,
+            "target": "产线",
+            "severity": "medium",
+            "reason": f"按 Takt 需求人数 {required} 人 < 现有 {current} 人，富余 {abs(worker_gap)} 人，"
+                      f"建议调岗/减人或承接更多工序，降低人工成本。",
+        })
+
+    # 2) Line imbalance → 拆分/重排（若上面没因产能已建议拆分）
+    if (
+        isinstance(lbr, (int, float)) and isinstance(lbr_target, (int, float))
+        and lbr < lbr_target
+        and not any(a["action"] == ACTION_SPLIT for a in actions)
+    ):
+        actions.append({
+            "action": ACTION_SPLIT,
+            "target": bn_name,
+            "severity": "medium",
+            "reason": f"产线平衡率 LBR {lbr}% 低于目标 {lbr_target}%，各工位忙闲不均，"
+                      f"应把瓶颈「{bn_name}」的部分工序拆分/重排到负荷较轻的工位。",
+        })
+
+    # 3) Per-station low efficiency (not the bottleneck) → 换人/培训
+    bn_id = bottleneck.get("station_id")
+    for s in stations:
+        if s.get("analysis_mode") == "error" or s.get("station_id") == bn_id:
+            continue
+        eff = (s.get("cycle_time_metrics", {}) or {}).get("efficiency")
+        if isinstance(eff, (int, float)) and 0 < eff < LOW_EFFICIENCY_PCT:
+            actions.append({
+                "action": ACTION_SWAP,
+                "target": s.get("station_name"),
+                "severity": "medium",
+                "reason": f"工位「{s.get('station_name')}」有效作业效率仅 {eff}%（等待/无效动作偏高），"
+                          f"疑似操作熟练度或方法问题，建议换人/再培训或优化作业方法。",
+            })
+
+    if not actions:
+        actions.append({
+            "action": ACTION_OK,
+            "target": "产线",
+            "severity": "low",
+            "reason": "当前产能、平衡率与各工位效率未见明显问题，维持现状并持续改善。",
+        })
+
+    severity_rank = {"high": 0, "medium": 1, "low": 2}
+    actions.sort(key=lambda a: severity_rank.get(a.get("severity"), 9))
+    return actions
+

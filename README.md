@@ -1,148 +1,113 @@
-# 工业IE智能体 - 动作分析与工时计算系统
+# 工业IE智能体4.0 MVP
 
-> **版本**：v1.0 (Day -3交付完成)
-> **日期**：2025-05-21
-> **状态**：✅ Day -3验收通过，保底核心模块已实现
+这是一套可运行的工业 IE 多视频产线分析 MVP。它支持项目管理、视频导入、并发分析、LBR 计算、瓶颈识别、改善报告导出，以及人工标注对照验证。
 
----
+## 核心能力
 
-## 项目简介
+- 文件系统项目管理：每个项目保存 `config.yaml`、视频、分析结果和报告。
+- **可插拔视觉分析**：
+  - **俯视工位（`view_type: top_down`）→ 真实识别**：MediaPipe Hands（每手21点）+ YOLO 物体检测，逐帧测出手部轨迹与动作序列，结果随画面变化。
+  - **其它/未指定机位 → 时长估算回退**：只用真实视频时长，动作数等为按时长合成的占位值（界面会明确标注"非识别"）。缺依赖/模型时也会优雅回退到这一模式。
+- 产线指标：LBR、瓶颈工位、等待损失、小时产能。
+- **项目信息 + 节拍(Takt)/产能/人力分析**：填写班次时长/休息/需求量/有效作业率/现有人数等（`config.project_info`），系统算出客户节拍 Takt、产能是否充足、按标准工时测算的需求人数与人力缺口（`src/core/cycle_time_calculator.py`）。选填，不阻断分析；缺参数时自动跳过节拍分析。
+- **改善决策（核心）**：把指标确定性地收敛成工厂可执行的三类结论——**加人 / 换人(调岗) / 拆分工序**，每条带真实数字理由（`recommend_line_actions`）。
+- **AI 动态报告（数字系统算、DeepSeek 写分析）**：内置 IE 方法论知识库（`data/knowledge/ie_methodology.yaml`：MTM/动作经济/ECRS/七大浪费/产线平衡/Takt/人因/劳动定额），按分析信号自动挑相关理论注入，DeepSeek 据真实数据撰写诊断/根因/改善方案/结论并**引用理论**（数字一律由系统计算、AI 不得编造）。AI 关闭或不可用时回退规则引擎，报告仍完整。PDF 为多区块报告（封面/执行摘要/改善决策/逐工位明细+动作时间轴图/工时/节拍/诊断/建议/路线图/结论/附录/签署）。
+- 准确率验证：生成人工标注模板，比较动作数、节拍、等待时间误差（以**动作数准确率**为核心判据）。
+- 网页端：Streamlit 单页应用，支持中英文切换，逐工位标注识别方式。
 
-工业IE智能体是一个基于AI的动作分析与MTM工时计算系统，旨在：
+> 诚实边界：动作分类规则为 v1，精度需在真实俯视素材上迭代；YOLO 为 COCO 通用预训练，工业零件/料盒识别需后续自定义训练。
 
-1. **提升分析效率**：自动完成视频姿态估计，减少80%人工时间
-2. **标准化分析流程**：统一MTM标准，结果一致可复用
-3. **支持规模化部署**：多工位、多产线并行分析能力
+## 本地运行
 
----
-
-## Day -3 完成内容（2025-05-21）
-
-### 已实现核心模块
-
-| 模块 | 文件 | 功能 | 状态 |
-|------|------|------|------|
-| **视频处理** | [src/core/video_processor.py](src/core/video_processor.py) | VideoProcessor类 - 视频读取、帧提取 | ✅ 完成 |
-| **姿态估计** | [src/core/pose_estimator.py](src/core/pose_estimator.py) | PoseEstimator类 - 33关键点提取 | ✅ 完成 |
-| **可视化工具** | [src/utils/visualization.py](src/utils/visualization.py) | 骨架绘制、标签绘制 | ✅ 完成 |
-| **界面框架** | [app/streamlit_app.py](app/streamlit_app.py) | Streamlit应用界面 | ✅ 完成 |
-| **配置文件** | [config/default.yaml](config/default.yaml) | 默认参数配置 | ✅ 完成 |
-| **MTM配置** | [config/mtm_tables.yaml](config/mtm_tables.yaml) | MTM时间表 | ✅ 完成 |
-| **启动脚本** | [run_offline.bat](run_offline.bat) | 离线启动脚本 | ✅ 完成 |
-
-### 验收结果
-
-```
-Day -3验收标准（全部达成）：
-✅ 项目结构创建完成
-✅ 视频能上传并在界面显示
-✅ 姿态估计能提取关键点（33个关键点）
-✅ 骨架动画能在界面显示
-✅ 所有模块导入验证通过
+```powershell
+pip install -r requirements.txt
+streamlit run app/streamlit_project_app.py
 ```
 
----
+然后用 Chrome 打开 `http://localhost:8501`。
 
-## 快速开始
+> Windows + Anaconda 上 torch 与 mediapipe 的 OpenMP 运行时会冲突（OMP Error #15）。代码已在入口设置 `KMP_DUPLICATE_LIB_OK=TRUE` 规避；如手动跑脚本报该错，在命令前加该环境变量即可。
 
-### 1. 启动应用
+## 视觉识别准备（俯视工位真实识别）
 
-```bash
-# 方式1：使用Streamlit命令
-streamlit run app/streamlit_app.py
+真实识别需要模型文件，先下载一次（约 20MB，存到 `data/models/`，不入库）：
 
-# 方式2：使用离线启动脚本（Windows）
-run_offline.bat
+```powershell
+python scripts/download_models.py
 ```
 
-### 2. 使用流程
+下载：`hand_landmarker.task`、`pose_landmarker_lite.task`（诊断对比用）、`yolov8n.pt`。
 
-1. 打开浏览器访问 `http://localhost:8501`
-2. 上传产线作业视频（支持MP4/AVI/MOV/MKV格式）
-3. 点击"开始分析"
-4. 观看骨架动画预览
+### 先跑诊断，用画面证据确认机位
 
----
+改造识别地基前，**先确认你的机位下 Hands / Pose 谁更可靠**：
 
-## 下一步开发计划
-
-### Day -2 任务（动作识别 + CSV导出）
-
-- ⏳ 动作识别规则引擎（R/G/M/RL四种动作）
-- ⏳ MTM分析器（标准工时计算）
-- ⏳ CSV导出器（动作序列表导出）
-
-### Day -1 任务（时间轴 + 效率指标）
-
-- ⏳ 时间轴生成器（matplotlib生成PNG图表）
-- ⏳ 效率指标计算（周期时间、动作效率）
-
-### Day 1~4 扩展功能（加分项）
-
-- ⏳ Wait动作识别
-- ⏳ PDF报告生成
-- ⏳ Assemble组合动作
-- ⏳ 多工位分析框架
-
----
-
-## 技术栈
-
-| 技术 | 版本 | 用途 |
-|------|------|------|
-| Python | 3.13.0 | 开发语言 |
-| OpenCV | 4.13.0 | 视频处理 |
-| MediaPipe | 0.10.35 | 姿态估计 |
-| Streamlit | 1.57.0 | Web界面 |
-| NumPy | 2.1.2 | 数值计算 |
-| Pandas | 2.2.3 | 数据处理 |
-| Matplotlib | 3.9.2 | 图表生成 |
-| PyYAML | 6.0.3 | 配置文件 |
-| ReportLab | 4.5.1 | PDF生成 |
-
----
-
-## 项目结构
-
-```
-工业IE智能体/
-├── README.md                   # 本文档
-├── requirements.txt            # 依赖清单
-├── run_offline.bat             # 离线启动脚本
-│
-├── config/
-│   ├── default.yaml            # 默认配置
-│   └── mtm_tables.yaml         # MTM时间表
-│
-├── src/
-│   ├── core/
-│   │   ├── video_processor.py  # 视频处理
-│   │   └── pose_estimator.py   # 姿态估计
-│   └── utils/
-│       └ visualization.py      # 可视化工具
-│
-├── app/
-│   └ streamlit_app.py          # Streamlit界面
-│
-├── demos/
-│   └ demo_integrated.py        # 整合Demo
-│
-└── docs/
-    ├── 工业IE智能体开发方案V3.0.md
-    ├── 比赛前准备计划V2.0.md
-    └── 动作标注指南.md
+```powershell
+python scripts/diagnose_vision.py 你的测试视频.mp4
 ```
 
----
+输出 `annotated_output.mp4`（白点=Pose、彩色21点=Hands、方框=YOLO）、`wrist_speed.png`（手速曲线），并在终端打印 Hands/Pose 可靠率与建议。俯视工位通常 Hands 稳、Pose 飘。
 
-## 文档参考
+## 导入测试视频
 
-- [工业IE智能体开发方案V3.0](docs/工业IE智能体开发方案V3.0.md) - 完整技术规格
-- [比赛前准备计划V2.0](docs/比赛前准备计划V2.0.md) - 交付时间线与任务分解
-- [动作标注指南](docs/动作标注指南.md) - 动作识别规则说明
+```powershell
+python scripts/import_video_folder.py "data/input_videos/test_videos_20260526_095117"
+```
 
----
+脚本会自动递归查找 MP4/AVI/MOV/MKV，创建新项目、导入视频（默认按俯视工位 `top_down` 处理）、运行分析并生成报告。
 
-## 联系方式
+## 准确率验证
 
-工业IE智能体团队 | 2025-05-21
+先确保项目已经跑过一次分析，然后生成标注模板：
+
+```powershell
+python scripts/create_ground_truth_template.py proj_20260526_095403
+```
+
+人工填写模板里的 `ground_truth_cycle_time`、`ground_truth_wait_time`、`ground_truth_action_count`，再运行验证：
+
+```powershell
+python scripts/validate_project_accuracy.py proj_20260526_095403 "data/projects/proj_20260526_095403/exports/ground_truth_template.csv"
+```
+
+输出 `validation_report.csv` / `validation_report.json`。
+
+> **看哪个指标**：节拍准确率是弱证据（系统节拍≈视频时长，人工秒表也按同段时长，天然偏高）。判断"是否真识别"请看 **动作数准确率**（目标 ≥ 80%）。
+
+## 调参说明
+
+常用参数在项目目录的 `config.yaml`，也可以在网页里修改。
+
+- `analysis.concurrency`：并发数（只对估算工位生效；视觉工位为稳定起见串行执行）。
+- `analysis.sample_rate`：**视觉抽帧步长**，每隔 N 帧跑一次推理。越大越快越粗，越小越准越慢。
+- `analysis.vision.enabled`：是否启用真实视觉识别。
+- `analysis.vision.hand_model` / `yolo_model`：模型文件路径。
+- `analysis.vision.min_action_frames`：动作段最小帧数，短于此并入相邻段（消碎片）。
+- `target.lbr_target`：目标线平衡率，通常先用 85。
+- `analysis.tuning.*`：估算回退模式下的节拍/等待/动作折算范围。
+- 工位 `view_type`：`top_down` 走真实识别，其它/缺省走时长估算。
+
+如果视频不是单个完整作业周期，优先在网页"视频与工位"里手动覆盖单周期节拍。
+
+## 网页端部署
+
+```powershell
+streamlit run app/streamlit_project_app.py --server.port 8501
+```
+
+Docker：
+
+```powershell
+docker build -t industrial-ie-agent .
+docker run -p 8501:8501 -v ${PWD}/data:/app/data industrial-ie-agent
+```
+
+更多部署说明见 [docs/web_deployment.md](docs/web_deployment.md)。
+
+## 测试
+
+```powershell
+python tests/test_core_flow.py
+```
+
+覆盖项目创建、工位添加、并发分析、报告生成、准确率验证（估算路径）。视觉识别的烟测在依赖/模型齐全时自动运行，否则跳过。
